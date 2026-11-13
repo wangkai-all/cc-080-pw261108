@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>楼宇能耗看板 · 计量质量与天气校正</title>
+  <meta name="description" content="本地生成的楼宇能耗看板：单位面积用能与日峰值对比、基线建立、天气与营业时长校正、计量质量标记。">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <h1>楼宇能耗看板</h1>
+      <span class="sub">单位面积用能 · 日峰值 · 基线校正 · 计量质量</span>
+    </div>
+    <div class="header-actions">
+      <span class="pill" id="data-pill"><span class="dot"></span><span id="data-pill-text">样例数据</span></span>
+      <span class="pill" id="quality-pill" title="当前所选时段内的计量问题数量"><span class="dot"></span><span>计量提示</span><span class="count" id="quality-count">0</span></span>
+      <button class="btn" id="theme-btn" aria-label="切换明暗主题">主题</button>
+      <button class="btn" id="export-btn">导出 CSV</button>
+      <button class="btn primary" id="import-btn">导入数据</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="filter-bar" aria-label="时间段筛选">
+      <div class="filter-group">
+        <label id="lbl-baseline">基线时段</label>
+        <div class="range-pair">
+          <input type="date" id="baseline-start" aria-labelledby="lbl-baseline">
+          <span class="tilde">至</span>
+          <input type="date" id="baseline-end" aria-labelledby="lbl-baseline">
+        </div>
+      </div>
+      <div class="filter-group">
+        <label id="lbl-range">对比时段</label>
+        <div class="range-pair">
+          <input type="date" id="range-start" aria-labelledby="lbl-range">
+          <span class="tilde">至</span>
+          <input type="date" id="range-end" aria-labelledby="lbl-range">
+        </div>
+      </div>
+      <div class="filter-group">
+        <label>快速选择</label>
+        <div class="presets" id="presets">
+          <button data-preset="all-events" type="button">重点事件窗口</button>
+          <button data-preset="summer-compare" type="button">夏季同比</button>
+          <button data-preset="autumn-window" type="button">秋季窗口</button>
+          <button data-preset="cold-snap" type="button">寒潮期间</button>
+        </div>
+      </div>
+      <div class="span-note" id="span-note"></div>
+    </section>
+
+    <div id="notice-host"></div>
+
+    <section class="kpi-row" aria-label="总体指标">
+      <div class="stat hero-stat">
+        <span class="label" id="hero-label">校正后单位面积用能变化</span>
+        <span class="value hero" id="hero-value">—</span>
+        <span class="delta" id="hero-delta"></span>
+        <div class="sparkline" id="hero-spark"></div>
+        <span class="foot" id="hero-foot"></span>
+      </div>
+      <div class="stat">
+        <span class="label">校正后单位面积日能耗</span>
+        <span class="value" id="kpi-intensity">—</span>
+        <span class="delta" id="kpi-intensity-delta"></span>
+        <span class="foot">kWh/m²·日，已归一到基线天气与营业时长</span>
+      </div>
+      <div class="stat">
+        <span class="label">天气与营业时长的影响</span>
+        <span class="value" id="kpi-effects">—</span>
+        <span class="delta" id="kpi-effects-delta"></span>
+        <span class="foot" id="kpi-effects-foot"></span>
+      </div>
+      <div class="stat">
+        <span class="label">每日峰值负荷（楼宇合计）</span>
+        <span class="value" id="kpi-peak">—</span>
+        <span class="delta" id="kpi-peak-delta"></span>
+        <span class="foot">所选时段内各楼日峰值之和的最大值</span>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="portfolio-title">
+      <div class="card-head">
+        <div>
+          <h2 id="portfolio-title">楼宇对比：单位面积用能与每日峰值</h2>
+          <p class="desc">校正前为对比时段实际值；校正后按基线时段的气温与营业时长归一。真实节能变化 = 校正前后差额中天气与营业时长无法解释的部分。所有数值基于完整日，缺测日已剔除且未按 0 计入。</p>
+        </div>
+        <div class="spacer"></div>
+      </div>
+      <div class="portfolio-table" id="portfolio-table"></div>
+    </section>
+
+    <section class="card" aria-labelledby="monthly-title">
+      <div class="card-head">
+        <div>
+          <h2 id="monthly-title">每日峰值曲线（按楼宇）</h2>
+          <p class="desc">每根柱是一个完整日的最高小时负荷；灰色斜纹表示缺测日，不画成零。切换楼宇可查看详细曲线。</p>
+        </div>
+        <div class="spacer"></div>
+      </div>
+      <div class="building-tabs" id="building-tabs" role="group" aria-label="选择楼宇"></div>
+      <div class="chart-wrap" id="peak-chart"></div>
+      <div id="peak-legend"></div>
+    </section>
+
+    <section class="detail-grid" aria-label="楼宇详情">
+      <div class="detail-main">
+        <section class="card" id="profile-card" aria-labelledby="profile-title">
+          <div class="card-head">
+            <div>
+              <div class="building-title">
+                <h2 id="profile-title">原始曲线与校正结果</h2>
+                <span class="meta" id="profile-meta"></span>
+              </div>
+              <p class="desc">实际逐小时用能（实线）与模型校正后的逐小时曲线（虚线，按基线气温和营业时长归一）。缺测时段留空并标注，估算与补录的小时单独着色。</p>
+            </div>
+            <div class="spacer"></div>
+            <div class="card-actions">
+              <div class="seg" role="group" aria-label="图表密度">
+                <button class="btn small" id="zoom-week" type="button">最近 14 天</button>
+                <button class="btn small" id="zoom-all" type="button">整个时段</button>
+              </div>
+            </div>
+          </div>
+          <div class="badge-row" id="profile-badges"></div>
+          <div class="chart-wrap" id="profile-chart"></div>
+          <div id="profile-legend"></div>
+        </section>
+
+        <section class="card" aria-labelledby="daily-title">
+          <div class="card-head">
+            <div>
+              <h2 id="daily-title">逐日明细</h2>
+              <p class="desc">完整日才参与对比与基线。点击表头可排序；缺测日在“状态”列单独标注。</p>
+            </div>
+            <div class="spacer"></div>
+          </div>
+          <div id="daily-table"></div>
+        </section>
+      </div>
+
+      <div class="detail-side">
+        <section class="card" id="model-card" aria-labelledby="model-title">
+          <div class="card-head">
+            <div>
+              <h2 id="model-title">基线模型</h2>
+              <p class="desc">只用基线时段完整日拟合，再应用到对比时段。</p>
+            </div>
+          </div>
+          <div id="model-body"></div>
+        </section>
+
+        <section class="card" id="issues-card" aria-labelledby="issues-title">
+          <div class="card-head">
+            <div>
+              <h2 id="issues-title">计量质量与异常</h2>
+              <p class="desc">独立标记：电表更换、倍率调整、缺测、补录、时区错位、重叠计量、估算补值、异常日期。</p>
+            </div>
+          </div>
+          <div id="issues-body"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="import-dialog" aria-labelledby="import-title">
+    <div class="dialog-head">
+      <div>
+        <h2 id="import-title">导入数据</h2>
+        <p class="sub">CSV 文件在本地解析，不会上传。可按列名自动识别表类型；缺少必需表格时不会生成错误结果。</p>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn ghost small" id="import-close" type="button">关闭</button>
+    </div>
+    <div class="dialog-body">
+      <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="选择或拖入 CSV 文件">
+        选择 CSV 文件，或拖入此处
+        <span class="hint">buildings.csv · meters.csv · multipliers.csv · meter_events.csv · weather.csv · business_hours.csv · readings.csv（补录：readings_backfill.csv）</span>
+        <input type="file" id="file-input" accept=".csv,text/csv" multiple class="sr-only">
+      </div>
+      <div class="table-status" id="table-status"></div>
+      <div class="sample-list" id="sample-links"></div>
+      <div id="import-diag"></div>
+      <div class="dialog-actions">
+        <button class="btn" id="load-sample" type="button">载入内置样例</button>
+        <button class="btn" id="download-sample" type="button">下载样例 CSV</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="apply-import" type="button" disabled>应用导入</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="backfill-dialog" aria-labelledby="backfill-title">
+    <div class="dialog-head">
+      <div>
+        <h2 id="backfill-title">补录缺失读数</h2>
+        <p class="sub" id="backfill-sub"></p>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn ghost small" id="backfill-close" type="button">关闭</button>
+    </div>
+    <div class="dialog-body">
+      <div id="backfill-gaps"></div>
+      <div class="dropzone" id="backfill-dropzone" role="button" tabindex="0" aria-label="选择补录 CSV 文件">
+        选择 readings_backfill.csv，或拖入此处
+        <span class="hint">列：meter_id,timestamp,interval_units,source。补录后只重算受影响时段。</span>
+        <input type="file" id="backfill-file" accept=".csv,text/csv" class="sr-only">
+      </div>
+      <div id="backfill-diag"></div>
+    </div>
+  </dialog>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>

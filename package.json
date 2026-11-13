@@ -1,0 +1,14 @@
+{
+  "name": "building-energy-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "楼宇能耗看板：本地样例数据、计量质量标记、天气与营业时长校正",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
